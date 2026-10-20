@@ -1,0 +1,383 @@
+.data
+
+#Initialisation grille : 
+grille_joueur : .space 16 
+grille_ordi : .space 16 
+
+#Messages:
+msg_demande_X:	.asciz "Entrez X : "
+msg_demande_Y: 	.asciz "Entrez Y : "
+msg_reponse:   	.asciz "\nVous avez tapé : "
+msg_erreur:    	.asciz "Erreur : chiffre invalide. Tapez entre 0 et 3.\n"
+msg_placement: 	.asciz "Vous Avez 3 bateaux, placez les :\n"
+msg_deja_place:	.asciz "Il y a déja un bateau ici.\n"
+msg_touche: 	.asciz "Bateau touché\n"
+msg_eau:   	.asciz "Aucun bateau touché\n"
+msg_deja_tire:	.asciz "Il y a déja eu un tir ici\n"
+msg_tour_joueur:.asciz "à votre tour : \n"
+msg_tour_ordi: 	.asciz "au tour de l'ordinateur \n"
+msg_victoire:  	.asciz "Bravo vous avez gagné\n"
+msg_defaite:   	.asciz "Dommage vous avez perdu\n"
+msg_niveau: 	.asciz "\nChoisissez la difficulté (1 = Débutant avec radar, 2 = Expert) : "
+msg_proche: 	.asciz "Il y a un bateau sur une case adjacente \n"
+
+
+.text
+
+
+main:
+
+#Initialisation grilles
+	la a0, grille_joueur
+	jal initialiser_grille
+	la a0, grille_ordi
+	jal initialiser_grille
+
+#choix de la difficulté
+boucle_niveau:
+    la a0, msg_niveau
+    li a7, 4
+    ecall
+    li a7, 5
+    ecall
+    
+# vérification si le joueur a tapé 1 ou 2 
+    li t1, 1
+    beq a0, t1, niveau_valide
+    li t1, 2
+    beq a0, t1, niveau_valide
+    j boucle_niveau             # Si ni 1 ni 2 on recommence
+
+niveau_valide:
+    mv s5, a0
+
+
+#Remplissage de la grille joueurs : 
+	la a0, msg_placement
+	li a7, 4
+	ecall
+	
+	li t6, 3                
+	la t5, grille_joueur
+	
+boucle_placement: # boucle pour placer 3 fois un bateau
+	la a0, msg_demande_X
+	jal demander_coordonnee
+	mv t3, a0
+	    
+	la a0, msg_demande_Y
+	jal demander_coordonnee
+	mv t4, a0           
+	
+#Transformation de X Y en index pour le tableau
+	mv a0, t3
+	mv a1, t4
+	jal calculer_index
+	mv t2, a0
+
+#verification qu'il y a pas déja un bateau 
+	add t1, t5, t2
+	lb t0, 0(t1)
+	beq t0, zero, suite # si égale à 0, on continue sinon on choisit une autre case
+
+	la a0, msg_deja_place
+	li a7, 4
+	ecall
+	j boucle_placement
+suite:	
+	li t0, 1
+	sb t0, 0(t1)
+	
+	addi t6, t6, -1
+	bne zero, t6, boucle_placement
+	
+#Remplissage de la grille ordi aléatoirement
+
+	li t6, 3
+	la t5, grille_ordi
+
+boucle_placement_ordi: # boucle pour placer 3 fois un bateau
+
+#Entier aléatoire entre à et 16 exclus
+	li a7, 42               
+	li a0, 0                
+	li a1, 16               
+	ecall                   
+
+#Vérification qu'il y ait pas de bateau sur la case (cad que se soit égale à 0)
+	add t1, t5, a0
+	lb t2, 0(t1)            
+	bne zero, t2, boucle_placement_ordi #si bateau on recommence
+	
+	li t3, 1
+	sb t3, 0(t1)
+	addi t6, t6, -1
+	bnez t6, boucle_placement_ordi
+	
+	
+#initialisation vie 
+	li s0, 3 #vie ordi
+	li s1, 3 #vie joueur
+
+boucle_jeu:
+
+#tour joueur
+	la a0, msg_tour_joueur
+	li a7, 4
+	ecall
+	
+#demande coordonnée de tir
+	la a0, msg_demande_X
+	jal demander_coordonnee
+	mv s2, a0               
+	la a0, msg_demande_Y
+	jal demander_coordonnee
+	mv s3, a0               
+	
+#calcul index
+	mv a0, s2
+	mv a1, s3
+	jal calculer_index
+	mv s4, a0               
+	
+#verification du tir
+	la a0, grille_ordi
+	mv a1, s4
+	jal verifier_tir #retourne 1 si touché 0 sinon
+	mv s6, a0
+	
+#besoin d'appeler le radar ? 
+	bne zero, s6, suite_tour_joueur #si un bateau est touché : pas besoin
+	
+	li t1, 2
+   	beq s5, t1, suite_tour_joueur #si niveau = 2 (expert) : pas besoin
+
+#sinon on appele la fonction radar :
+ 	la a0, grille_ordi          
+    	mv a1, s2                   
+    	mv a2, s3                   
+    	jal verifier_proximite 
+	
+	
+
+
+suite_tour_joueur:
+#mise à jour de la vie de l'ordi
+	sub s0, s0, s6 # fait -1 si touché -0 sinon      
+	beq zero, s0, message_victoire #verification si vie ordi = 0 (cad victoire du joueur)
+
+
+#tour ordi
+	la a0, msg_tour_ordi
+	li a7, 4
+	ecall
+
+choix_tir_ordi:
+
+#random int entre 0 et 16 exclus pour le choix de la case
+	li a7, 42
+	li a0, 0
+	li a1, 16
+	ecall                   
+
+#Verification si l'ordi a déja tiré sur cette case (cad si égale à 2 ou 3)
+#retirage d'un index si c'est le cas
+	mv s4, a0
+	la t5, grille_joueur    
+	add t1, t5, s4          
+	lb t2, 0(t1)
+	li t3, 2
+	beq t2, t3, choix_tir_ordi  
+	li t3, 3 
+	beq t2, t3, choix_tir_ordi
+	
+#Tir sur la grille joueur
+	la a0, grille_joueur
+	mv a1, s4
+	jal verifier_tir
+	
+#mise à jour de la vie du joueur 
+	sub s1, s1, a0 # fait -1 si touché -0 sinon 
+	beqz s1, message_defaite  #verification si vie joueur = 0 (cad defaite du joueur)
+	    
+	j boucle_jeu            
+	
+
+#Gestion des message de victoire ou de defaite
+message_victoire:
+	la a0, msg_victoire
+    	li a7, 4
+    	ecall
+    	j fin_programme
+
+message_defaite:
+    	la a0, msg_defaite
+    	li a7, 4
+    	ecall
+
+fin_programme: # exit()
+    	li a7, 10
+    	ecall
+
+
+
+#FONCTIONS :
+
+
+#Fonction qui initialise les grilles avec que des 0, l'adresse de la grille est en a0
+initialiser_grille:
+	li t0, 16    
+	mv t1, a0             
+
+boucle_init:
+	sb zero, 0(t1)	
+	addi t1, t1, 1
+	addi t0, t0, -1
+	bne t0,zero, boucle_init    
+	
+	jalr zero, 0(ra)
+
+
+
+
+#Fonction qui demande une coordonnée
+demander_coordonnee:
+	mv t1, a0
+	
+boucle_saisie:
+	mv a0, t1
+	li a7, 4
+	ecall
+	li a7, 5        
+	ecall                   
+#Test : 
+#<0 ?
+	blt a0, zero, coord_invalide  
+#>3 ?
+	li t2, 3                
+	bgt a0, t2, coord_invalide
+	jalr zero, 0(ra)
+	             
+#gestion erreur
+coord_invalide:
+	la a0, msg_erreur       
+	li a7, 4                
+	ecall
+	j boucle_saisie
+
+#Fonction qui calcule l'index de la grille(tableau) en fonction de X et Y (a0 et a1)
+#index = (X*4) + Y
+calculer_index:
+	slli t0, a0, 2     
+	add a0, t0, a1
+	jalr zero, 0(ra)
+	
+	
+	
+	
+	
+#Fontion qui vérifie si le tir touche un bateau
+#a0 la grille et a1 l'index de la case visé
+# renvoie 1 si un bateau est touché 0 sinon 
+verifier_tir:
+	#lecture de la case pour brancher vers la bonne étiquette
+	add t1, a0, a1
+	lb t2, 0(t1)
+	li t3, 1               
+	beq t2, t3, tir_touche # si il y avait 1 cad si il y un bateau 
+	beq zero, t2, tir_eau # si il y avait 0 cad si il n'y avait pas de bateau
+	j tir_deja_cible #si 2 ou 3 cad qu'il y a déja eu un tir sur la case 
+
+tir_touche: # si il y avait 1 cad si il y un bateau
+	li t3, 3
+	sb t3, 0(t1)
+
+	la a0, msg_touche
+	li a7, 4
+	ecall
+    
+	li a0, 1 
+	jalr zero, 0(ra)
+
+tir_eau: # si il y avait 0 cad si il n'y avait pas de bateau
+	li t3, 2 
+	sb t3, 0(t1)
+	    
+	la a0, msg_eau
+	li a7, 4
+	ecall
+	    
+	li a0, 0
+	jalr zero, 0(ra)
+	
+tir_deja_cible: #si 2 ou 3 cad qu'il y a déja eu un tir sur la case 
+	la a0, msg_deja_tire
+	li a7, 4
+	ecall
+	    
+	li a0, 0 
+	jalr zero, 0(ra)
+	
+	
+
+#Fonction qui regarde si il y a des bateaux sur les cases adjacents 
+#a0 contient la grille, a1 X et a2 Y
+
+verifier_proximite:
+#init de la fonction
+    	mv t0, a0
+    	mv t1, a1
+    	mv t2, a2
+    	li t6, 1
+
+#verif gauche
+	beq zero, t1, prox_droite    # Si X == 0, on ne peut pas aller à gauche
+	addi t3, t1, -1
+	slli t4, t3, 2
+	add t4, t4, t2
+	add t4, t0, t4
+	lb t5, 0(t4)
+	beq t5, t6, prox_trouve # Si 1 on passe directement au message
+
+
+#verif droite
+prox_droite:
+    	li t3, 3
+    	beq t1, t3, prox_haut # Si X == 3, on ne peut pas aller à droite
+    	addi t3, t1, 1 
+    	slli t4, t3, 2
+    	add t4, t4, t2
+    	add t4, t0, t4
+    	lb t5, 0(t4)
+    	beq t5, t6, prox_trouve # Si 1 on passe directement au message
+
+#verif haut
+prox_haut:
+    	beq zero, t2, prox_bas # Si Y == 0, on ne peut pas aller en haut
+    	addi t3, t2, -1
+    	slli t4, t1, 2
+    	add t4, t4, t3
+    	add t4, t0, t4
+    	lb t5, 0(t4)
+    	beq t5, t6, prox_trouve # Si 1 on passe directement au message
+
+#verif bas
+prox_bas:
+    	li t3, 3
+    	beq t2, t3, prox_fin    # Si Y == 3, pas de bas
+    	addi t3, t2, 1
+    	slli t4, t1, 2          
+    	add t4, t4, t3          
+    	add t4, t0, t4
+    	lb t5, 0(t4)
+    	beq t5, t6, prox_trouve # Si 1 on passe directement au message
+
+    	j prox_fin              # Si on arrive ici, il n'y a pas de bateau adjacent
+
+prox_trouve: #affichage qu'il y a un bateau
+    	la a0, msg_proche
+    	li a7, 4
+    	ecall
+
+prox_fin:
+    	jalr zero, 0(ra)
